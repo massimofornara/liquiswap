@@ -36,4 +36,4 @@ export interface Transaction {
   fee: string;
 }
 
-export type TabType = 'dashboard' | 'on-ramp' | 'off-ramp' | 'swap';
+export type TabType = 'dashboard' | 'buy' | 'sell' | 'swap';
