@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { fiatCurrencies, popularTokens, paymentMethods } from '../data';
+import { fiatCurrencies, referenceTokens, paymentMethods } from '../data';
 
 const OnRamp: React.FC = () => {
   const [fiatAmount, setFiatAmount] = useState('1000');
   const [selectedFiat, setSelectedFiat] = useState(fiatCurrencies[0]);
-  const [selectedToken, setSelectedToken] = useState(popularTokens[0]);
+  const [selectedToken, setSelectedToken] = useState(referenceTokens[0]);
   const [selectedPayment, setSelectedPayment] = useState(paymentMethods[0]);
   const [walletAddress, setWalletAddress] = useState('');
   const [showSuccess, setShowSuccess] = useState(false);
@@ -75,10 +75,10 @@ const OnRamp: React.FC = () => {
         <div className="token-input p-4 flex items-center gap-3">
           <select
             value={selectedToken.symbol}
-            onChange={(e) => setSelectedToken(popularTokens.find(t => t.symbol === e.target.value) || popularTokens[0])}
+            onChange={(e) => setSelectedToken(referenceTokens.find(t => t.symbol === e.target.value) || referenceTokens[0])}
             className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm cursor-pointer focus:outline-none focus:border-indigo-500"
           >
-            {popularTokens.map(t => (
+            {referenceTokens.map(t => (
               <option key={t.symbol} value={t.symbol}>{t.symbol} - {t.name}</option>
             ))}
           </select>

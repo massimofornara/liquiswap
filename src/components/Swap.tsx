@@ -1,30 +1,95 @@
 import React, { useState, useMemo } from 'react';
-import { illiquidTokens, chains } from '../data';
+import { illiquidTokens, referenceTokens, chains } from '../data';
 import { Token } from '../types';
 
 const Swap: React.FC = () => {
   const [fromToken, setFromToken] = useState<Token>(illiquidTokens[0]);
-  const [toToken, setToToken] = useState<Token>(illiquidTokens[1]);
+  const [toToken, setToToken] = useState<Token>(referenceTokens[0]); // Reference token (high mcap)
   const [amount, setAmount] = useState('1000000');
   const [slippage, setSlippage] = useState('5');
   const [selectedChain, setSelectedChain] = useState('Ethereum');
   const [showSuccess, setShowSuccess] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [showTokenModal, setShowTokenModal] = useState<'from' | 'to' | null>(null);
+  const [modalFilter, setModalFilter] = useState<'illiquid' | 'reference'>('illiquid');
 
   const filteredTokens = useMemo(() => {
-    const allTokens = [...illiquidTokens];
-    if (searchQuery) {
-      return allTokens.filter(t =>
-        t.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        t.symbol.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        t.address.toLowerCase().includes(searchQuery.toLowerCase())
-      );
+    if (modalFilter === 'reference') {
+      if (searchQuery) {
+        return referenceTokens.filter(t =>
+          t.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          t.symbol.toLowerCase().includes(searchQuery.toLowerCase())
+        );
+      }
+      return referenceTokens;
+    } else {
+      const tokens = searchQuery
+        ? illiquidTokens
+        : illiquidTokens.filter(t => t.chain === selectedChain);
+      if (searchQuery) {
+        return tokens.filter(t =>
+          t.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          t.symbol.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          t.address.toLowerCase().includes(searchQuery.toLowerCase())
+        );
+      }
+      return tokens;
     }
-    return allTokens.filter(t => t.chain === selectedChain);
-  }, [searchQuery, selectedChain]);
+  }, [searchQuery, selectedChain, modalFilter]);
 
-  // Simulate price impact for illiquid tokens
+  // Get the reference token price from the creator price
+  const getReferenceTokenPrice = (symbol: string): number => {
+    const ref = referenceTokens.find(t => t.symbol === symbol);
+    return ref?.price || 0;
+  };
+
+  // Calculate the USD value of the illiquid token based on creator-set price
+  const getIlliquidTokenUSDValue = (token: Token): number => {
+    if (!token.creatorPrice) return 0;
+    const refPrice = getReferenceTokenPrice(token.creatorPrice.referenceToken);
+    return token.creatorPrice.amount * refPrice;
+  };
+
+  // Calculate output amount based on creator-set price
+  const calculateOutput = (): { outputAmount: number; usdValue: number; referenceAmount: number } => {
+    const amt = parseFloat(amount || '0');
+    
+    if (fromToken.isIlliquid && fromToken.creatorPrice) {
+      // From illiquid token: use creator-set price
+      const refSymbol = fromToken.creatorPrice.referenceToken;
+      const refAmount = amt * fromToken.creatorPrice.amount; // amount in reference token
+      const refPrice = getReferenceTokenPrice(refSymbol);
+      const usdValue = refAmount * refPrice;
+      
+      if (toToken.isIlliquid && toToken.creatorPrice) {
+        // Both illiquid: convert through reference
+        const toRefPrice = getReferenceTokenPrice(toToken.creatorPrice.referenceToken);
+        const toUSDPerToken = toToken.creatorPrice.amount * toRefPrice;
+        return { outputAmount: usdValue / toUSDPerToken, usdValue, referenceAmount: refAmount };
+      } else {
+        // To reference token
+        const toPrice = toToken.price || 1;
+        return { outputAmount: usdValue / toPrice, usdValue, referenceAmount: refAmount };
+      }
+    } else if (toToken.isIlliquid && toToken.creatorPrice) {
+      // From reference to illiquid: use creator-set price
+      const fromPrice = fromToken.price || 1;
+      const usdValue = amt * fromPrice;
+      const toRefPrice = getReferenceTokenPrice(toToken.creatorPrice.referenceToken);
+      const toUSDPerToken = toToken.creatorPrice.amount * toRefPrice;
+      return { outputAmount: usdValue / toUSDPerToken, usdValue, referenceAmount: usdValue / getReferenceTokenPrice(toToken.creatorPrice.referenceToken) / toToken.creatorPrice.amount * toToken.creatorPrice.amount };
+    } else {
+      // Both reference tokens
+      const fromPrice = fromToken.price || 1;
+      const toPrice = toToken.price || 1;
+      const usdValue = amt * fromPrice;
+      return { outputAmount: (amt * fromPrice) / toPrice, usdValue, referenceAmount: amt };
+    }
+  };
+
+  const { outputAmount, usdValue, referenceAmount } = calculateOutput();
+
+  // Price impact for illiquid tokens
   const priceImpact = useMemo(() => {
     const amt = parseFloat(amount || '0');
     if (fromToken.liquidity === 'Very Low') return Math.min(amt * 0.0000001 * 15, 25);
@@ -32,10 +97,8 @@ const Swap: React.FC = () => {
     return Math.min(amt * 0.0000001 * 3, 5);
   }, [amount, fromToken]);
 
-  const exchangeRate = fromToken.price && toToken.price ? fromToken.price / toToken.price : 0;
-  const outputAmount = (parseFloat(amount || '0') * exchangeRate * (1 - priceImpact / 100)).toFixed(6);
-  const fee = (parseFloat(amount || '0') * 0.005).toFixed(6); // 0.5% swap fee
-  const minReceived = (parseFloat(outputAmount) * (1 - parseFloat(slippage) / 100)).toFixed(6);
+  const fee = (parseFloat(amount || '0') * 0.005).toFixed(6);
+  const minReceived = (outputAmount * (1 - parseFloat(slippage) / 100)).toFixed(6);
 
   const handleSwap = () => {
     setShowSuccess(true);
@@ -58,11 +121,37 @@ const Swap: React.FC = () => {
     setToToken(temp);
   };
 
+  const formatNumber = (num: number): string => {
+    if (num === 0) return '0';
+    if (num < 0.000001) return num.toExponential(4);
+    if (num < 0.01) return num.toFixed(8);
+    if (num < 1) return num.toFixed(6);
+    if (num < 1000) return num.toFixed(4);
+    return num.toLocaleString('en-US', { maximumFractionDigits: 2 });
+  };
+
   return (
     <div className="slide-up space-y-6">
       <div className="text-center mb-6">
         <h2 className="text-2xl font-bold text-white mb-2">Swap Illiquid Tokens</h2>
-        <p className="text-slate-400 text-sm">Exchange low-liquidity tokens with our custom AMM routing</p>
+        <p className="text-slate-400 text-sm">
+          Prices set by token creators in top market-cap crypto with fiat ramp support
+        </p>
+      </div>
+
+      {/* Info Banner */}
+      <div className="glass-card p-4 border-indigo-500/20 bg-indigo-500/5">
+        <div className="flex items-start gap-3">
+          <span className="text-xl">💡</span>
+          <div>
+            <p className="text-sm font-medium text-indigo-300">How Creator-Set Pricing Works</p>
+            <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+              Illiquid token creators establish their token's value in terms of high-market-cap cryptocurrencies 
+              (BTC, ETH, USDT, etc.) that support <span className="text-cyan-400">fiat on/off-ramp on any bank account</span>. 
+              This ensures transparent, verifiable pricing without needing liquidity pools.
+            </p>
+          </div>
+        </div>
       </div>
 
       {/* Chain Selector */}
@@ -83,15 +172,15 @@ const Swap: React.FC = () => {
         ))}
       </div>
 
-      {/* From Token */}
+      {/* From Token (Illiquid) */}
       <div className="glass-card p-5">
         <div className="flex items-center justify-between mb-2">
-          <label className="text-xs text-slate-400 uppercase tracking-wider">From</label>
+          <label className="text-xs text-slate-400 uppercase tracking-wider">From (Illiquid Token)</label>
           <span className="text-xs text-slate-500">Balance: 5,000,000 {fromToken.symbol}</span>
         </div>
         <div className="token-input p-4 flex items-center gap-3">
           <button
-            onClick={() => setShowTokenModal('from')}
+            onClick={() => { setShowTokenModal('from'); setModalFilter('illiquid'); }}
             className="flex items-center gap-2 bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm hover:border-indigo-500 transition-all"
           >
             <span className="w-6 h-6 rounded-full bg-gradient-to-br from-orange-400 to-red-500 flex items-center justify-center text-xs">
@@ -108,15 +197,29 @@ const Swap: React.FC = () => {
             className="flex-1 bg-transparent text-2xl font-bold text-white outline-none text-right"
           />
         </div>
-        <div className="flex justify-between mt-2">
-          <div className="flex items-center gap-2">
-            <span className={`text-xs px-2 py-0.5 rounded-full ${
-              fromToken.liquidity === 'Very Low' ? 'bg-red-500/20 text-red-400' : 'bg-yellow-500/20 text-yellow-400'
-            }`}>
-              {fromToken.liquidity} Liquidity
-            </span>
-            <span className="text-xs text-slate-500">on {fromToken.chain}</span>
+        
+        {/* Creator Price Display */}
+        {fromToken.isIlliquid && fromToken.creatorPrice && (
+          <div className="mt-3 p-3 rounded-lg bg-slate-900/50 border border-slate-700/50">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-xs text-amber-400">👑 Creator-Set Price</span>
+              <span className={`text-xs px-1.5 py-0.5 rounded-full ${
+                fromToken.liquidity === 'Very Low' ? 'bg-red-500/20 text-red-400' : 'bg-yellow-500/20 text-yellow-400'
+              }`}>
+                {fromToken.liquidity} Liquidity
+              </span>
+            </div>
+            <p className="text-sm text-white font-medium">
+              1 {fromToken.symbol} = {fromToken.creatorPrice.amount} {fromToken.creatorPrice.referenceToken}
+            </p>
+            <p className="text-xs text-slate-400 mt-1">
+              ≈ ${formatNumber(getIlliquidTokenUSDValue(fromToken))} USD • MCap: {fromToken.marketCap}
+            </p>
           </div>
+        )}
+        
+        <div className="flex justify-between mt-2">
+          <span className="text-xs text-slate-500">on {fromToken.chain}</span>
           <button
             onClick={() => setAmount('5000000')}
             className="text-xs px-2 py-1 rounded bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/30 transition-all"
@@ -136,49 +239,102 @@ const Swap: React.FC = () => {
         </button>
       </div>
 
-      {/* To Token */}
+      {/* To Token (Reference or Illiquid) */}
       <div className="glass-card p-5">
         <div className="flex items-center justify-between mb-2">
           <label className="text-xs text-slate-400 uppercase tracking-wider">To (estimated)</label>
-          <span className="text-xs text-slate-500">Balance: 250,000 {toToken.symbol}</span>
+          <span className="text-xs text-slate-500">≈ ${formatNumber(usdValue)} USD</span>
         </div>
         <div className="token-input p-4 flex items-center gap-3">
           <button
-            onClick={() => setShowTokenModal('to')}
+            onClick={() => { setShowTokenModal('to'); setModalFilter('reference'); }}
             className="flex items-center gap-2 bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm hover:border-indigo-500 transition-all"
           >
-            <span className="w-6 h-6 rounded-full bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center text-xs">
+            <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs ${
+              toToken.isIlliquid 
+                ? 'bg-gradient-to-br from-purple-400 to-pink-500' 
+                : 'bg-gradient-to-br from-green-400 to-emerald-500'
+            }`}>
               {toToken.symbol.charAt(0)}
             </span>
             {toToken.symbol}
             <span className="text-slate-400">▾</span>
           </button>
           <div className="flex-1 text-right">
-            <span className="text-2xl font-bold text-cyan-400">{outputAmount}</span>
+            <span className="text-2xl font-bold text-cyan-400">{formatNumber(outputAmount)}</span>
           </div>
         </div>
-        <div className="flex justify-between mt-2">
-          <div className="flex items-center gap-2">
-            <span className={`text-xs px-2 py-0.5 rounded-full ${
-              toToken.liquidity === 'Very Low' ? 'bg-red-500/20 text-red-400' : 'bg-yellow-500/20 text-yellow-400'
-            }`}>
-              {toToken.liquidity} Liquidity
-            </span>
-            <span className="text-xs text-slate-500">on {toToken.chain}</span>
+
+        {/* Reference token info */}
+        {!toToken.isIlliquid && (
+          <div className="mt-3 p-3 rounded-lg bg-green-500/5 border border-green-500/20">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-xs text-green-400">🏦 Fiat Ramp Available</span>
+              <span className="text-xs text-slate-500">MCap Rank #{toToken.marketCapRank}</span>
+            </div>
+            <p className="text-xs text-slate-400">
+              {toToken.symbol} supports on/off-ramp to <span className="text-white">any bank account</span> worldwide. 
+              Market Cap: {toToken.marketCap}
+            </p>
           </div>
-        </div>
+        )}
+
+        {toToken.isIlliquid && toToken.creatorPrice && (
+          <div className="mt-3 p-3 rounded-lg bg-amber-500/5 border border-amber-500/20">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-xs text-amber-400">👑 Creator-Set Price</span>
+            </div>
+            <p className="text-sm text-white font-medium">
+              1 {toToken.symbol} = {toToken.creatorPrice.amount} {toToken.creatorPrice.referenceToken}
+            </p>
+          </div>
+        )}
       </div>
 
-      {/* Swap Details */}
+      {/* Swap Route & Details */}
       <div className="glass-card p-5 space-y-3">
         <div className="flex items-center justify-between mb-2">
-          <span className="text-xs text-slate-400 uppercase tracking-wider">Swap Details</span>
-          <span className="text-xs text-indigo-400">Powered by LiquiSwap Router v3</span>
+          <span className="text-xs text-slate-400 uppercase tracking-wider">Swap Route</span>
+          <span className="text-xs text-indigo-400">LiquiSwap Router v3</span>
         </div>
         
+        {/* Route visualization */}
+        <div className="p-3 rounded-lg bg-slate-900/50 border border-slate-700/50">
+          <div className="flex items-center gap-2 text-xs flex-wrap">
+            <span className="px-2 py-1 rounded bg-orange-500/20 text-orange-400 font-medium">{fromToken.symbol}</span>
+            <span className="text-slate-500">→</span>
+            {fromToken.isIlliquid && fromToken.creatorPrice && (
+              <>
+                <span className="px-2 py-1 rounded bg-indigo-500/20 text-indigo-400 font-medium">
+                  {fromToken.creatorPrice.referenceToken}
+                </span>
+                <span className="text-slate-500">→</span>
+              </>
+            )}
+            {!toToken.isIlliquid ? (
+              <span className="px-2 py-1 rounded bg-green-500/20 text-green-400 font-medium">{toToken.symbol}</span>
+            ) : (
+              <>
+                <span className="px-2 py-1 rounded bg-green-500/20 text-green-400 font-medium">
+                  {toToken.creatorPrice?.referenceToken || '???'}
+                </span>
+                <span className="text-slate-500">→</span>
+                <span className="px-2 py-1 rounded bg-purple-500/20 text-purple-400 font-medium">{toToken.symbol}</span>
+              </>
+            )}
+          </div>
+          <p className="text-xs text-slate-500 mt-2">
+            Route uses creator-set pricing via {fromToken.creatorPrice?.referenceToken || 'reference'} as bridge
+          </p>
+        </div>
+
         <div className="flex justify-between text-sm">
-          <span className="text-slate-400">Exchange Rate</span>
-          <span className="text-white">1 {fromToken.symbol} = {exchangeRate.toFixed(6)} {toToken.symbol}</span>
+          <span className="text-slate-400">Effective Rate</span>
+          <span className="text-white">1 {fromToken.symbol} = {formatNumber(outputAmount / parseFloat(amount || '1'))} {toToken.symbol}</span>
+        </div>
+        <div className="flex justify-between text-sm">
+          <span className="text-slate-400">USD Value</span>
+          <span className="text-white">${formatNumber(usdValue)}</span>
         </div>
         <div className="flex justify-between text-sm">
           <span className="text-slate-400">Price Impact</span>
@@ -193,10 +349,6 @@ const Swap: React.FC = () => {
         <div className="flex justify-between text-sm">
           <span className="text-slate-400">Min. Received</span>
           <span className="text-white">{minReceived} {toToken.symbol}</span>
-        </div>
-        <div className="flex justify-between text-sm">
-          <span className="text-slate-400">Route</span>
-          <span className="text-indigo-400 text-xs">{fromToken.symbol} → LiquiSwap Pool → {toToken.symbol}</span>
         </div>
 
         {/* Slippage */}
@@ -232,7 +384,7 @@ const Swap: React.FC = () => {
               <p className="text-sm font-medium text-yellow-400">High Price Impact Warning</p>
               <p className="text-xs text-slate-400 mt-1">
                 This trade has a significant price impact due to low liquidity. 
-                Consider reducing the trade size or using a higher slippage tolerance.
+                The creator-set price is used as reference, but actual execution may vary.
               </p>
             </div>
           </div>
@@ -256,9 +408,9 @@ const Swap: React.FC = () => {
               <span className="text-green-400">✓</span>
             </div>
             <div>
-              <p className="text-sm font-medium text-green-400">Swap completed</p>
+              <p className="text-sm font-medium text-green-400">Swap completed at creator-set price</p>
               <p className="text-xs text-slate-400">
-                {amount} {fromToken.symbol} → {outputAmount} {toToken.symbol}
+                {formatNumber(parseFloat(amount))} {fromToken.symbol} → {formatNumber(outputAmount)} {toToken.symbol}
               </p>
             </div>
           </div>
@@ -278,12 +430,36 @@ const Swap: React.FC = () => {
                 ✕
               </button>
             </div>
+
+            {/* Filter Tabs */}
+            <div className="flex gap-2 mb-4">
+              <button
+                onClick={() => setModalFilter('illiquid')}
+                className={`flex-1 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                  modalFilter === 'illiquid'
+                    ? 'bg-orange-500/20 border border-orange-500/50 text-orange-400'
+                    : 'bg-slate-800 border border-slate-700 text-slate-400'
+                }`}
+              >
+                🪙 Illiquid Tokens
+              </button>
+              <button
+                onClick={() => setModalFilter('reference')}
+                className={`flex-1 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+                  modalFilter === 'reference'
+                    ? 'bg-green-500/20 border border-green-500/50 text-green-400'
+                    : 'bg-slate-800 border border-slate-700 text-slate-400'
+                }`}
+              >
+                🏦 High MCap (Fiat Ramp)
+              </button>
+            </div>
             
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by name, symbol, or paste address..."
+              placeholder={modalFilter === 'reference' ? 'Search high mcap tokens...' : 'Search by name, symbol, or address...'}
               className="w-full bg-slate-900/50 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 mb-4"
             />
 
@@ -294,20 +470,37 @@ const Swap: React.FC = () => {
                   onClick={() => handleSelectToken(token)}
                   className="w-full p-3 rounded-xl bg-slate-800/50 border border-slate-700 hover:border-indigo-500/50 transition-all flex items-center gap-3 text-left"
                 >
-                  <span className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center text-xs font-bold">
+                  <span className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
+                    token.isIlliquid 
+                      ? 'bg-gradient-to-br from-orange-400 to-red-500' 
+                      : 'bg-gradient-to-br from-green-400 to-emerald-500'
+                  }`}>
                     {token.symbol.charAt(0)}
                   </span>
-                  <div className="flex-1">
+                  <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium text-white">{token.symbol}</div>
-                    <div className="text-xs text-slate-400">{token.name}</div>
+                    <div className="text-xs text-slate-400 truncate">{token.name}</div>
+                    {token.creatorPrice && (
+                      <div className="text-xs text-amber-400 mt-0.5">
+                        Creator: 1 {token.symbol} = {token.creatorPrice.amount} {token.creatorPrice.referenceToken}
+                      </div>
+                    )}
                   </div>
-                  <div className="text-right">
-                    <div className={`text-xs px-2 py-0.5 rounded-full ${
-                      token.liquidity === 'Very Low' ? 'bg-red-500/20 text-red-400' : 'bg-yellow-500/20 text-yellow-400'
-                    }`}>
-                      {token.liquidity}
+                  <div className="text-right flex-shrink-0">
+                    {token.isIlliquid ? (
+                      <div className={`text-xs px-2 py-0.5 rounded-full ${
+                        token.liquidity === 'Very Low' ? 'bg-red-500/20 text-red-400' : 'bg-yellow-500/20 text-yellow-400'
+                      }`}>
+                        {token.liquidity}
+                      </div>
+                    ) : (
+                      <div className="text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-400">
+                        🏦 Fiat Ramp
+                      </div>
+                    )}
+                    <div className="text-xs text-slate-500 mt-1">
+                      {token.isIlliquid ? token.marketCap : `#${token.marketCapRank} MCap`}
                     </div>
-                    <div className="text-xs text-slate-500 mt-1">{token.chain}</div>
                   </div>
                 </button>
               ))}

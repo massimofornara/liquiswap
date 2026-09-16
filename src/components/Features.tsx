@@ -9,8 +9,8 @@ const Features: React.FC = () => {
     },
     {
       icon: '🔄',
-      title: 'Illiquid Token Swap',
-      description: 'Custom AMM routing for tokens with low or no liquidity on major DEXes.',
+      title: 'Creator-Set Pricing',
+      description: 'Illiquid token prices are set by creators in terms of top market-cap crypto (BTC, ETH, USDT...) with fiat ramp on any bank account.',
     },
     {
       icon: '🛡️',

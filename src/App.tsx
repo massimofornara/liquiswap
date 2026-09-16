@@ -5,6 +5,7 @@ import OffRamp from './components/OffRamp';
 import Swap from './components/Swap';
 import Stats from './components/Stats';
 import Features from './components/Features';
+import ReferenceTokens from './components/ReferenceTokens';
 import { TabType } from './types';
 
 function App() {
@@ -36,8 +37,13 @@ function App() {
             </div>
           </div>
 
-          {/* Features */}
+          {/* Reference Tokens Table */}
           <div className="max-w-5xl mx-auto">
+            <ReferenceTokens />
+          </div>
+
+          {/* Features */}
+          <div className="max-w-5xl mx-auto mt-12">
             <Features />
           </div>
 
@@ -74,7 +80,7 @@ function App() {
                 <p className="text-xs text-slate-500">
                   © 2026 LiquiSwap. Licensed fiat on/off-ramp provider. Regulated in EU, UK, and US.
                   <br />
-                  <span className="text-slate-600">Swap any token — even illiquid ones. Our custom AMM pools ensure you always get the best rate.</span>
+                  <span className="text-slate-600">Swap any token — even illiquid ones. Prices set by creators in top market-cap crypto with fiat on/off-ramp on any bank account.</span>
                 </p>
               </div>
             </div>
