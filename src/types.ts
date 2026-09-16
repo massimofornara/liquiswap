@@ -8,15 +8,12 @@ export interface Token {
   liquidity?: string;
   isIlliquid?: boolean;
   logo?: string;
-  // For illiquid tokens: price set by the creator in terms of a high-market-cap reference token
   creatorPrice?: CreatorPrice;
   marketCap?: string;
   marketCapRank?: number;
 }
 
 export interface CreatorPrice {
-  // How many reference tokens = 1 of this illiquid token
-  // e.g., { referenceToken: 'ETH', amount: 0.000001 } means 1 PEPE2 = 0.000001 ETH
   referenceToken: string;
   amount: number;
 }
@@ -39,4 +36,4 @@ export interface Transaction {
   fee: string;
 }
 
-export type TabType = 'on-ramp' | 'off-ramp' | 'swap';
+export type TabType = 'dashboard' | 'on-ramp' | 'off-ramp' | 'swap';
