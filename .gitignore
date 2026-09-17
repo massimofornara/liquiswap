@@ -1,5 +1,10 @@
 node_modules/
-.next/
+.env
+*.pem
+private.pem
+public.pem
+.hardhat/
+cache/
+artifacts/
+.DS_Store
 dist/
-build/
-*.log
